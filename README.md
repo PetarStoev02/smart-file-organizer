@@ -1,114 +1,96 @@
-```markdown
 # SmartFileSorter
 
-**SmartFileSorter** is an automated document sorting system that classifies and organizes files into categorized directories based on their content using AI. The system reads PDF files, extracts text, classifies the document using a machine learning model, and moves the file to an appropriate folder.
+SmartFileSorter is an automated PDF intake pipeline that watches a drop folder, performs zero-shot classification on each document, and files it away inside a structured archive organized by document type, year, month, and week. The repo also ships with a lightweight PDF generator so you can produce realistic sample data for demos or tests.
 
-## Features:
-- **Automatic Document Classification**: Uses a neural network to classify documents based on content.
-- **File Organization**: Sorts files into directories categorized by document type, year, month, and week.
-- **Zero-Shot Classification**: Leverages a pre-trained model for classification without the need for custom training.
-- **PDF Parsing**: Extracts text from PDF documents to classify and organize them.
+## Contents
 
-## Requirements
+| File | Description |
+| --- | --- |
+| `sorter.py` | Long-running watcher that classifies PDFs using a Hugging Face zero-shot classifier and moves them into the correct archive folder. |
+| `documents.py` | Utility that fabricates Bulgarian-language invoices, protocols, and reports as PDFs using ReportLab. Helpful when you need seed data. |
 
-Before running the program, make sure you have the following Python libraries installed:
+When started, `sorter.py` creates the expected folder tree under `./sorted_documents` (2020‑2030, months, weeks) and keeps polling `./incoming_documents` every 30 seconds.
 
-- `transformers`
-- `torch`
-- `pdfplumber`
-- `shutil`
-- `os`
-- `time`
-- `datetime`
+## Prerequisites
 
-You can install the required libraries using the following:
+- Python 3.10+ (tested on Linux)
+- pip with internet access (for downloading the Transformers model on first run)
+- System packages required by `torch`/`transformers` (see their docs if installation fails)
+
+### Python dependencies
+
+Install the runtime dependencies into your virtual environment of choice:
 
 ```bash
-pip install transformers torch pdfplumber
+pip install transformers torch pdfplumber reportlab
 ```
 
-## How It Works
+`transformers` automatically downloads the default zero-shot model (`facebook/bart-large-mnli`) the first time you invoke the pipeline.
 
-1. **Document Classification**:  
-   The program classifies documents based on their content using a neural network. It extracts text from PDF files and uses a pre-trained zero-shot classification model from the `transformers` library to classify the document into one of the predefined categories (e.g., **Фактура** (Invoice), **Протокол** (Protocol), **Отчет** (Report)).
+## Quick Start
 
-2. **File Sorting**:  
-   After classification, the document is moved to the appropriate directory structure. The directories are organized by:
-   - Document Type (Invoice, Protocol, Report)
-   - Year (from 2020 to 2030)
-   - Month (1 to 12)
-   - Week (1 to 5)
-
-3. **Monitoring and Sorting Loop**:  
-   The script runs in a loop, checking for new files in the `incoming_documents` folder every 30 seconds. If new files are found, they are processed and moved to the correct folder.
-
-## How to Run
-
-1. **Generating Documents** (optional):  
-   If you need to generate PDF documents for testing or production, run the `documents.py` script. This script is responsible for creating PDF files that will be used for classification.
-
-   Run it with the following command:
+1. **Clone & install dependencies**
+   ```bash
+   git clone <repo-url>
+   cd SmartFileSorter
+   pip install transformers torch pdfplumber reportlab
+   ```
+2. **Generate sample PDFs (optional but recommended)**
    ```bash
    python documents.py
    ```
-
-2. **Running the Document Sorting System**:  
-   After generating the documents, you can run the **SmartFileSorter** program. To start the sorting process, simply run the main script.
-
+   This creates Bulgarian-language sample invoices, protocols, and reports inside `./incoming_documents`.
+3. **Start the sorter**
    ```bash
    python sorter.py
    ```
+   Keep the process running; it polls every 30 s, classifies each PDF, and moves it into `./sorted_documents/<Type>/<Year>/Month_<n>/Week_<n>/`.
 
-   - The program will automatically check the `incoming_documents` folder every 30 seconds.
-   - It will classify and move any new documents to the appropriate directories based on their content.
+## How It Works
 
-## Directory Structure
-
-The program expects the following directory structure:
-
-```
-./incoming_documents/    # Directory where incoming documents are placed
-./sorted_documents/      # Directory where documents will be sorted into categorized folders
-```
-
-Documents will be moved to directories organized by the document type, year, month, and week, for example:
-
-```
-./sorted_documents/Фактури/2024/Месец_12/Седмица_1/
-./sorted_documents/Протоколи/2024/Месец_12/Седмица_2/
-```
+1. **Watching for new files** – `sorter.py` ensures the `incoming_documents` and `sorted_documents` folders exist, then loops indefinitely checking for new PDFs.
+2. **PDF text extraction** – Each PDF is parsed with `pdfplumber` to gather text content. Empty files are skipped with a warning.
+3. **Zero-shot classification** – The extracted text is sent to the Hugging Face pipeline with candidate labels `Invoice`, `Protocol`, and `Report`. The best label becomes the archive destination.
+4. **Hierarchical filing** – Files are moved with `shutil` into a tree of document type → year (2020‑2030) → month (`Month_<n>`) → week (`Week_<n>`). Duplicate filenames are preserved by suffixing `_1`, `_2`, etc.
+5. **Progress feedback** – The console shows classification results plus a countdown until the next polling cycle so you can monitor activity at a glance.
 
 ## Configuration
 
-You can modify the following parameters in the `sorter.py` script:
-- `CHECK_INTERVAL`: Interval (in seconds) for checking the `incoming_documents` folder.
-- `DOCUMENT_TREE`: List of document types (e.g., **Фактури**, **Протоколи**, **Отчети**).
+Tune behavior by editing the constants near the top of `sorter.py`:
 
-## Example Output
+- `INPUT_DIR` / `OUTPUT_DIR` – change watcher and archive roots.
+- `CHECK_INTERVAL` – seconds between folder scans (default 30).
+- `DOCUMENT_TREE` – names of the top-level archive folders to pre-create. Update this if you add new labels.
 
-When running the program, you'll see logs in the terminal like this:
+If you extend the candidate labels in `classify_document`, make sure they stay in sync with `DOCUMENT_TREE`.
+
+## Directory Layout
+
+```
+incoming_documents/     # Drop PDFs here (created automatically)
+sorted_documents/
+├── Invoices/
+│   └── 2024/Month_12/Week_1/<file>.pdf
+├── Protocols/
+└── Reports/
+```
+
+The watcher creates the full 2020‑2030 range so you can move historical files without additional setup.
+
+## Sample Output
 
 ```
 Document Отчет_2024-11-07.pdf classified as: Report
-Sorting document: Отчет_2024-11-07.pdf | Classified as: Report | Remaining time: 30sFile ./incoming_documents\Отчет_2024-11-07.pdf moved to ./sorted_documents\Report\2024\Month_12\Week_2\Отчет_2024-11-07.pdf
+Sorting document: Отчет_2024-11-07.pdf | Classified as: Report | Remaining time: 28s
+File ./incoming_documents/Отчет_2024-11-07.pdf moved to ./sorted_documents/Report/2024/Month_11/Week_2/Отчет_2024-11-07.pdf
 ```
 
-## Notes
+## Troubleshooting
 
-- The program currently supports PDF files only.
-- If the program encounters a duplicate file in the destination folder, it will automatically remove the older version and replace it with the new one.
+- **Model download fails** – ensure the machine has internet access; optionally pre-download the model using `transformers-cli`.
+- **Torch wheel errors** – install a torch version that matches your Python and CUDA/CPU setup (see pytorch.org for the correct command).
+- **Corrupt PDFs** – invalid or image-only PDFs produce empty text and are skipped. Convert them to searchable PDFs before rerunning.
 
 ## License
 
-This project is licensed under the MIT License.
-```
-
-### Key sections in the `README.md`:
-1. **Project Overview** – A brief description of the project and its features.
-2. **Requirements** – Instructions to install necessary Python libraries.
-3. **How It Works** – Detailed steps explaining the process of classification and sorting.
-4. **How to Run** – Clear instructions on running the `documents.py` for document generation and how to run the sorting system.
-5. **Directory Structure** – Information about the expected folder structure.
-6. **Example Output** – Sample logs to show how the program behaves when sorting files.
-7. **Notes** – Additional information about PDF file support and handling duplicates.
-8. **License** – The project's license information.
+MIT © SmartFileSorter contributors
